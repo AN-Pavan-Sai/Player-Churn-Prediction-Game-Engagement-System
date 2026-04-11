@@ -159,20 +159,43 @@ export default function PredictionForm({
         </div>
       </div>
 
-      {/* ── Game Difficulty ── */}
-      <div>
-        <label className="label-text">Game Difficulty</label>
-        <select
-          className="select-field"
-          value={form.GameDifficulty}
-          onChange={(e) => set("GameDifficulty", e.target.value)}
-        >
-          {DIFFICULTY_OPTIONS.map((o) => (
-            <option key={o} value={o}>
-              {o}
-            </option>
-          ))}
-        </select>
+      {/* ── Row: Play Time + Difficulty ── */}
+      <div className="grid gap-5 sm:grid-cols-2">
+        <div>
+          <label className="label-text">
+            Play Time (hrs/day):{" "}
+            <span className="text-brand-400 font-semibold">
+              {form.PlayTimeHours}
+            </span>
+          </label>
+          <input
+            type="range"
+            className="slider-field mt-1"
+            min={0}
+            max={24}
+            step={0.5}
+            value={form.PlayTimeHours}
+            onChange={(e) => set("PlayTimeHours", Number(e.target.value))}
+          />
+          <div className="mt-1 flex justify-between text-xs text-gray-500">
+            <span>0h</span>
+            <span>24h</span>
+          </div>
+        </div>
+        <div>
+          <label className="label-text">Game Difficulty</label>
+          <select
+            className="select-field"
+            value={form.GameDifficulty}
+            onChange={(e) => set("GameDifficulty", e.target.value)}
+          >
+            {DIFFICULTY_OPTIONS.map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {/* ── In-Game Purchases ── */}
