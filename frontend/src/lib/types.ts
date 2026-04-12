@@ -24,6 +24,12 @@ export interface PredictionResponse {
   agent_strategies?: string[];
 }
 
+export interface AgentAskResponse {
+  agent_answer: string;
+  agent_strategies: string[];
+  confidence_level: string;
+}
+
 export interface HealthResponse {
   status: string;
   model_loaded: boolean;

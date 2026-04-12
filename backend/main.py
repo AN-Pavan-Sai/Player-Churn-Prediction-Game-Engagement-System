@@ -301,6 +301,62 @@ def predict(player: PredictInput):
 
 
 # ---------------------------------------------------------------------------
+# Agent / LLM Endpoint - Called separately when user clicks "Ask Agent"
+# ---------------------------------------------------------------------------
+class AgentQueryInput(BaseModel):
+    player_data: dict
+    query: str = Field(default=DEFAULT_QUERY)
+
+
+class AgentQueryResponse(BaseModel):
+    agent_answer: str
+    agent_strategies: list[str]
+    confidence_level: str
+
+
+@app.post("/agent/ask", response_model=AgentQueryResponse)
+def ask_agent(query_input: AgentQueryInput):
+    """
+    Dedicated endpoint for LLM agent queries.
+    This is called when user clicks 'Ask Agent' to ensure LLM is invoked.
+    """
+    if agent is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Agent workflow not initialized. Check GROQ_API_KEY and dependencies."
+        )
+
+    try:
+        result = agent.invoke({
+            "player_data": query_input.player_data,
+            "user_query": query_input.query
+        })
+
+        report = result.get("final_report", {})
+
+        # Build answer from report sections
+        answer_parts = [
+            report.get("executive_summary", ""),
+            report.get("engagement_analysis", ""),
+        ]
+        combined = " ".join(part.strip() for part in answer_parts if part)
+
+        strategies = report.get("personalized_strategies", [])
+        if not isinstance(strategies, list):
+            strategies = []
+
+        return AgentQueryResponse(
+            agent_answer=combined or "No analysis available.",
+            agent_strategies=[str(item) for item in strategies][:5],
+            confidence_level=report.get("confidence_level", "medium"),
+        )
+
+    except Exception as exc:
+        logger.error("Agent query failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Agent query failed: {exc}")
+
+
+# ---------------------------------------------------------------------------
 # Model comparison & feature importance helpers
 # ---------------------------------------------------------------------------
 RESULTS_DIR = os.path.join(BASE_DIR, "models")

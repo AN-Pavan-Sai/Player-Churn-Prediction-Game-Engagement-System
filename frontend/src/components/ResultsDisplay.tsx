@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { predictChurn } from "@/lib/api";
+import { askAgent } from "@/lib/api";
 import type { PlayerInput, PredictionResponse } from "@/lib/types";
 import GaugeChart from "./GaugeChart";
 import {
@@ -95,10 +95,11 @@ export default function ResultsDisplay({ result, loading, playerData }: Props) {
 
     setAgentLoading(true);
     try {
-      const response = await predictChurn({
-        ...playerData,
-        query: agentQuery.trim() || DEFAULT_AGENT_QUERY,
-      } as PlayerInput & { query?: string });
+      // Call the dedicated /agent/ask endpoint - this triggers the LLM
+      const response = await askAgent(
+        playerData,
+        agentQuery.trim() || DEFAULT_AGENT_QUERY
+      );
 
       setAgentAnswer(response.agent_answer || null);
       setAgentStrategies(response.agent_strategies || []);

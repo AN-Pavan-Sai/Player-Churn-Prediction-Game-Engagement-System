@@ -7,17 +7,30 @@ import type {
   ModelCompareResponse,
   FeatureImportanceResponse,
   ModelWeightsResponse,
+  AgentAskResponse,
 } from "./types";
 
 const API = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000",
   headers: { "Content-Type": "application/json" },
-  timeout: 15000,
+  timeout: 30000,  // Increased timeout for LLM calls
 });
 
 /** Predict churn for a single player */
 export async function predictChurn(data: PlayerInput): Promise<PredictionResponse> {
   const res = await API.post<PredictionResponse>("/predict", data);
+  return res.data;
+}
+
+/** Ask the AI agent for insights - calls LLM dynamically */
+export async function askAgent(
+  playerData: PlayerInput,
+  query: string
+): Promise<AgentAskResponse> {
+  const res = await API.post<AgentAskResponse>("/agent/ask", {
+    player_data: playerData,
+    query,
+  });
   return res.data;
 }
 
