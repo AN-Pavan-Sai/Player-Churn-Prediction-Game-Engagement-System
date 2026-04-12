@@ -3,14 +3,16 @@ FastAPI Backend for Player Churn Prediction System.
 Provides REST endpoints for the Next.js frontend.
 """
 
+import logging
+import os
+import sys
+
+import joblib
+import numpy as np
+import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-import pandas as pd
-import numpy as np
-import joblib
-import os
-import sys
 
 # ---------------------------------------------------------------------------
 # Path setup — so we can import the existing ML modules
@@ -18,8 +20,11 @@ import sys
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BASE_DIR)
 
+from backend.agent.workflow import DEFAULT_QUERY, create_agent_workflow
 from backend.ml.feature_engineering import run_feature_engineering
 from backend.ml.preprocess import MODELS_DIR
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # FastAPI app
@@ -46,6 +51,7 @@ model = None
 scaler = None
 label_encoders = None
 feature_names = None
+agent = None
 
 
 def _ensure_model_loaded():
@@ -71,7 +77,7 @@ def _build_weight_rows(names, coefficients):
 @app.on_event("startup")
 def load_artifacts():
     """Load ML artifacts into memory when the server starts."""
-    global model, scaler, label_encoders, feature_names
+    global model, scaler, label_encoders, feature_names, agent
     try:
         model = joblib.load(os.path.join(MODELS_DIR, "churn_model.pkl"))
         scaler = joblib.load(os.path.join(MODELS_DIR, "scaler.pkl"))
@@ -80,6 +86,13 @@ def load_artifacts():
         print(f"✅ Model loaded — {len(feature_names)} features")
     except Exception as e:
         print(f"⚠️  Could not load model artifacts: {e}")
+
+    try:
+        agent = create_agent_workflow()
+        logger.info("✅ Agent workflow initialized")
+    except Exception as e:
+        agent = None
+        logger.warning("⚠️ Could not initialize agent workflow: %s", e)
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +126,16 @@ class PredictionResponse(BaseModel):
     will_churn: bool
     risk_level: str
     recommendations: list[str]
+    agent_query: str | None = None
+    agent_answer: str | None = None
+    agent_strategies: list[str] = []
+
+
+class PredictInput(PlayerInput):
+    query: str | None = Field(
+        default=None,
+        description="Optional question for the AI agent using the same /predict endpoint",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +169,28 @@ def get_recommendations(risk_level: str, data: dict) -> list[str]:
     return recs
 
 
+def get_enhanced_recommendations(risk_level: str, data: dict) -> list[str]:
+    """
+    Return improved recommendations for the existing /predict endpoint.
+
+    We keep the same API response shape, but if the Milestone 2 agent is
+    available we reuse its personalized strategy generation internally.
+    """
+    if agent is None:
+        return get_recommendations(risk_level, data)
+
+    try:
+        result = agent.invoke({"player_data": data, "user_query": DEFAULT_QUERY})
+        report = result.get("final_report", {})
+        strategies = report.get("personalized_strategies", [])
+        if isinstance(strategies, list) and strategies:
+            return [str(item) for item in strategies][:5]
+    except Exception as exc:
+        logger.warning("Enhanced recommendation generation failed: %s", exc)
+
+    return get_recommendations(risk_level, data)
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -175,12 +220,14 @@ def model_info():
 
 
 @app.post("/predict", response_model=PredictionResponse)
-def predict(player: PlayerInput):
+def predict(player: PredictInput):
     """Predict churn risk for a single player."""
     _ensure_model_loaded()
 
     try:
-        data = player.model_dump()
+        payload = player.model_dump()
+        user_query = payload.pop("query", None)
+        data = payload
         df = pd.DataFrame([data])
 
         # Encode categorical columns
@@ -207,17 +254,39 @@ def predict(player: PlayerInput):
         else:
             risk_level = "LOW"
 
-        recommendations = get_recommendations(risk_level, data)
+        recommendations = get_enhanced_recommendations(risk_level, data)
+
+        agent_answer = None
+        agent_strategies: list[str] = []
+        if user_query and agent is not None:
+            try:
+                result = agent.invoke({"player_data": data, "user_query": user_query})
+                report = result.get("final_report", {})
+                answer_parts = [
+                    report.get("executive_summary", ""),
+                    report.get("engagement_analysis", ""),
+                ]
+                combined = " ".join(part.strip() for part in answer_parts if part)
+                agent_answer = combined or None
+                strategies = report.get("personalized_strategies", [])
+                if isinstance(strategies, list):
+                    agent_strategies = [str(item) for item in strategies][:5]
+            except Exception as exc:
+                logger.warning("Agent follow-up generation failed: %s", exc)
 
         return PredictionResponse(
             churn_probability=round(probability, 4),
             will_churn=bool(prediction),
             risk_level=risk_level,
             recommendations=recommendations,
+            agent_query=user_query,
+            agent_answer=agent_answer,
+            agent_strategies=agent_strategies,
         )
 
     except Exception as e:
         raise HTTPException(status_code=422, detail=str(e))
+
 
 
 # ---------------------------------------------------------------------------

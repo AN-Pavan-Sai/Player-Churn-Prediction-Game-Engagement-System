@@ -78,6 +78,11 @@ else
     log "Frontend packages already installed"
 fi
 
+# Clear stale Next.js build cache so static chunks/CSS stay in sync in dev
+info "Clearing frontend .next cache..."
+rm -rf .next
+log "Frontend cache cleared"
+
 cd ..
 
 # ─── 6. Start both servers ───

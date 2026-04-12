@@ -19,6 +19,9 @@ export interface PredictionResponse {
   will_churn: boolean;
   risk_level: "HIGH" | "MEDIUM" | "LOW";
   recommendations: string[];
+  agent_query?: string | null;
+  agent_answer?: string | null;
+  agent_strategies?: string[];
 }
 
 export interface HealthResponse {

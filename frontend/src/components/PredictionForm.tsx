@@ -16,12 +16,14 @@ import { Loader2, RotateCcw } from "lucide-react";
 
 interface Props {
   onResult: (r: PredictionResponse) => void;
+  onPlayerSubmit?: (player: PlayerInput) => void;
   loading: boolean;
   setLoading: (v: boolean) => void;
 }
 
 export default function PredictionForm({
   onResult,
+  onPlayerSubmit,
   loading,
   setLoading,
 }: Props) {
@@ -73,6 +75,7 @@ export default function PredictionForm({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    onPlayerSubmit?.(form);
     try {
       const result = await predictChurn(form);
       onResult(result);

@@ -1,22 +1,41 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import type { PredictionResponse } from "@/lib/types";
+import { predictChurn } from "@/lib/api";
+import type { PlayerInput, PredictionResponse } from "@/lib/types";
 import GaugeChart from "./GaugeChart";
 import {
   AlertTriangle,
   CheckCircle2,
   ShieldAlert,
-  Lightbulb,
   Loader2,
+  Sparkles,
+  MessageSquareText,
 } from "lucide-react";
+import { toast } from "sonner";
 
 interface Props {
   result: PredictionResponse | null;
   loading: boolean;
+  playerData: PlayerInput | null;
 }
 
-export default function ResultsDisplay({ result, loading }: Props) {
+const DEFAULT_AGENT_QUERY =
+  "Why is this player likely to churn and what are the best ways to retain them?";
+
+export default function ResultsDisplay({ result, loading, playerData }: Props) {
+  const [agentQuery, setAgentQuery] = useState(DEFAULT_AGENT_QUERY);
+  const [agentLoading, setAgentLoading] = useState(false);
+  const [agentAnswer, setAgentAnswer] = useState<string | null>(null);
+  const [agentStrategies, setAgentStrategies] = useState<string[]>([]);
+
+  useEffect(() => {
+    setAgentQuery(DEFAULT_AGENT_QUERY);
+    setAgentAnswer(null);
+    setAgentStrategies([]);
+  }, [result?.churn_probability, result?.risk_level, result?.will_churn]);
+
   if (loading) {
     return (
       <div className="glass-card flex min-h-[520px] flex-col items-center justify-center gap-4 text-gray-400">
@@ -68,6 +87,31 @@ export default function ResultsDisplay({ result, loading }: Props) {
 
   const RiskIcon = riskConfig.icon;
 
+  const handleAskAgent = async () => {
+    if (!playerData) {
+      toast.error("Please run a prediction first.");
+      return;
+    }
+
+    setAgentLoading(true);
+    try {
+      const response = await predictChurn({
+        ...playerData,
+        query: agentQuery.trim() || DEFAULT_AGENT_QUERY,
+      } as PlayerInput & { query?: string });
+
+      setAgentAnswer(response.agent_answer || null);
+      setAgentStrategies(response.agent_strategies || []);
+      toast.success("AI agent answered your question.");
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : "Failed to ask the AI agent";
+      toast.error(message);
+    } finally {
+      setAgentLoading(false);
+    }
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
@@ -109,25 +153,63 @@ export default function ResultsDisplay({ result, loading }: Props) {
         </p>
       </div>
 
-      {/* Recommendations */}
-      <div>
-        <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-300">
-          <Lightbulb className="h-4 w-4 text-brand-400" />
-          Recommendations
+      <div className="rounded-2xl border border-[var(--border)] bg-[var(--background)]/60 p-4">
+        <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-200">
+          <Sparkles className="h-4 w-4 text-brand-300" />
+          Ask the AI agent
         </div>
-        <ul className="space-y-2">
-          {recommendations.map((rec, i) => (
-            <motion.li
-              key={i}
-              initial={{ opacity: 0, x: -10 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.1 * i }}
-              className="rounded-xl border border-[var(--border)] bg-[var(--background)]/60 px-4 py-3 text-sm text-gray-300"
-            >
-              {rec}
-            </motion.li>
-          ))}
-        </ul>
+        <textarea
+          className="input-field min-h-[120px] resize-y"
+          value={agentQuery}
+          onChange={(e) => setAgentQuery(e.target.value)}
+          placeholder="Ask why the player may churn or what actions to take next..."
+        />
+        <div className="mt-3 flex justify-end">
+          <button
+            type="button"
+            onClick={handleAskAgent}
+            disabled={agentLoading || !playerData}
+            className="btn-primary flex items-center justify-center gap-2 px-4 py-2.5 text-sm"
+          >
+            {agentLoading ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Asking...
+              </>
+            ) : (
+              <>
+                <MessageSquareText className="h-4 w-4" />
+                Ask Agent
+              </>
+            )}
+          </button>
+        </div>
+
+        {agentAnswer && (
+          <div className="mt-4 space-y-4">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--card)]/60 px-4 py-3 text-sm leading-7 text-gray-300">
+              {agentAnswer}
+            </div>
+
+            {agentStrategies.length > 0 && (
+              <div>
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
+                  AI Suggested Actions
+                </div>
+                <ul className="space-y-2">
+                  {agentStrategies.map((strategy, index) => (
+                    <li
+                      key={`${strategy}-${index}`}
+                      className="rounded-xl border border-[var(--border)] bg-[var(--card)]/60 px-4 py-3 text-sm text-gray-300"
+                    >
+                      {strategy}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </motion.div>
   );

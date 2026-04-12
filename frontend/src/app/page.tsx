@@ -4,11 +4,12 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import PredictionForm from "@/components/PredictionForm";
 import ResultsDisplay from "@/components/ResultsDisplay";
-import type { PredictionResponse } from "@/lib/types";
+import type { PlayerInput, PredictionResponse } from "@/lib/types";
 
 export default function HomePage() {
   const [result, setResult] = useState<PredictionResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [lastPlayerData, setLastPlayerData] = useState<PlayerInput | null>(null);
 
   return (
     <div className="space-y-8 pb-16 pt-4">
@@ -31,6 +32,7 @@ export default function HomePage() {
         >
           <PredictionForm
             onResult={setResult}
+            onPlayerSubmit={setLastPlayerData}
             loading={loading}
             setLoading={setLoading}
           />
@@ -42,7 +44,11 @@ export default function HomePage() {
           transition={{ delay: 0.35, duration: 0.5 }}
           className="lg:sticky lg:top-24"
         >
-          <ResultsDisplay result={result} loading={loading} />
+          <ResultsDisplay
+            result={result}
+            loading={loading}
+            playerData={lastPlayerData}
+          />
         </motion.div>
       </div>
     </div>
