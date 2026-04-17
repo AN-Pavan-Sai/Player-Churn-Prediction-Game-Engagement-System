@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BASE_DIR)
 
-from backend.agent.workflow import DEFAULT_QUERY, create_agent_workflow
+from backend.agent.workflow import create_agent_workflow
 from backend.ml.feature_engineering import run_feature_engineering
 from backend.ml.preprocess import MODELS_DIR
 
@@ -190,7 +190,7 @@ def get_enhanced_recommendations(risk_level: str, data: dict) -> list[str]:
         return get_recommendations(risk_level, data)
 
     try:
-        result = agent.invoke({"player_data": data, "user_query": DEFAULT_QUERY})
+        result = agent.invoke({"player_data": data, "user_query": None})
         report = result.get("final_report", {})
         strategies = report.get("personalized_strategies", [])
         if isinstance(strategies, list) and strategies:
@@ -305,7 +305,7 @@ def predict(player: PredictInput):
 # ---------------------------------------------------------------------------
 class AgentQueryInput(BaseModel):
     player_data: dict
-    query: str = Field(default=DEFAULT_QUERY)
+    query: Optional[str] = Field(default=None)
 
 
 class AgentQueryResponse(BaseModel):

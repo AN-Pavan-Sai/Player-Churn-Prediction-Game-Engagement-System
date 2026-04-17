@@ -47,7 +47,12 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_QUERY = "Why is this player at risk of churn and what should we do to retain them?"
+def get_dynamic_query(risk_level: str) -> str:
+    if risk_level == "HIGH":
+        return "This player is at high risk of churning. What are the critical warning signs, and what immediate, personalized actions can we take to save them?"
+    elif risk_level == "MEDIUM":
+        return "This player shows some signs of disengagement. Why might they be losing momentum, and how can we proactively re-engage them?"
+    return "This player is currently engaged. What are their strongest retention drivers, and how can we reward their loyalty?"
 
 class AgentState(TypedDict, total=False):
     player_data: dict[str, Any]
@@ -304,7 +309,7 @@ def _build_report_prompt(state: AgentState) -> str:
 You are creating a structured churn-risk report for a gaming analytics product.
 
 User question:
-{state.get("user_query", DEFAULT_QUERY)}
+{state.get("user_query") or get_dynamic_query(state.get("ml_prediction", {}).get("risk_level", "MEDIUM"))}
 
 Player data:
 {json.dumps(state["player_data"], indent=2)}
@@ -347,7 +352,7 @@ class ChurnAgent:
     def invoke(self, state: AgentState) -> AgentState:
         initial_state: AgentState = {
             "player_data": state["player_data"],
-            "user_query": state.get("user_query", DEFAULT_QUERY),
+            "user_query": state.get("user_query"),
             "warnings": list(state.get("warnings", [])),
         }
         return self.app.invoke(initial_state)
