@@ -20,7 +20,6 @@ from typing import Any, TypedDict
 
 import pandas as pd
 
-from backend.agent.prompts import build_analysis_prompt, build_report_prompt
 from backend.ml.feature_engineering import run_feature_engineering
 from backend.ml.predict import predict_single
 
@@ -47,6 +46,33 @@ except ImportError:  # pragma: no cover - optional dependency at runtime
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+# Keywords that indicate a gaming / churn / engagement related question
+_RELEVANT_KEYWORDS = {
+    "churn", "player", "game", "gaming", "engagement", "retention", "session",
+    "play", "level", "achievement", "purchase", "risk", "score", "strategy",
+    "recommend", "inactive", "active", "quit", "leave", "return", "comeback",
+    "reward", "offer", "notification", "progression", "difficulty", "genre",
+    "duration", "frequency", "behavior", "behaviour", "predict", "analysis",
+    "why", "how", "what", "factor", "reason", "cause", "improve", "reduce",
+    "increase", "decrease", "save", "lose", "losing", "engaged", "disengaged",
+    "monetization", "spending", "revenue", "ltv", "lifetime", "loyalty",
+}
+
+_OFF_TOPIC_RESPONSE = (
+    "I'm specialized in player churn analysis and game engagement strategies. "
+    "Your question doesn't appear to be related to this player's gaming behavior. "
+    "Please ask about churn risk factors, engagement patterns, or retention strategies "
+    "for this player profile."
+)
+
+
+def _is_relevant_query(query: str | None) -> bool:
+    """Return True if the query is related to gaming / churn / engagement."""
+    if not query or not query.strip():
+        return True  # empty query = use default dynamic query
+    words = set(query.lower().split())
+    return bool(words & _RELEVANT_KEYWORDS)
 
 
 def get_dynamic_query(risk_level: str) -> str:
@@ -362,15 +388,110 @@ def _fallback_report(state: AgentState) -> dict[str, Any]:
     }
 
 
+def _build_analysis_prompt(player_data: dict[str, Any], prediction: dict[str, Any]) -> str:
+    return f"""
+You are a gaming retention analyst.
+Given the player data and ML prediction below, explain why this player may churn.
+
+Player data:
+{json.dumps(player_data, indent=2)}
+
+ML prediction:
+{json.dumps(prediction, indent=2)}
+
+Return valid JSON with this exact shape:
+{{
+  "engagement_analysis": "2-4 sentence explanation in clear language",
+  "key_risk_factors": ["factor 1", "factor 2", "factor 3"],
+  "confidence_level": "high" | "medium" | "low"
+}}
+
+Rules:
+- Be specific to the data.
+- Do not invent features not present in the player data.
+- Keep factors actionable and easy to understand.
+"""
+
+
+def _build_report_prompt(state: AgentState) -> str:
+    return f"""
+You are creating a structured churn-risk report for a gaming analytics product.
+
+User question:
+{state.get("user_query") or get_dynamic_query(state.get("ml_prediction", {}).get("risk_level", "MEDIUM"))}
+
+Player data:
+{json.dumps(state["player_data"], indent=2)}
+
+ML prediction:
+{json.dumps(state["ml_prediction"], indent=2)}
+
+Analysis:
+{json.dumps({
+    "engagement_analysis": state["engagement_analysis"],
+    "key_risk_factors": state["key_risk_factors"],
+    "confidence_level": state["confidence_level"],
+}, indent=2)}
+
+Industry research:
+{json.dumps(state.get("industry_best_practices", []), indent=2)}
+
+Return valid JSON with this exact shape:
+{{
+  "direct_answer_to_user": "Clear, direct paragraph directly answering the User question",
+  "executive_summary": "2-3 sentence overview",
+  "engagement_analysis": "clear explanation",
+  "key_risk_factors": ["factor 1", "factor 2"],
+  "personalized_strategies": ["strategy 1", "strategy 2", "strategy 3"],
+  "industry_best_practices": ["practice 1", "practice 2"],
+  "sources": ["https://..."],
+  "disclaimers": ["ethical disclaimer 1", "UX disclaimer 2"],
+  "confidence_level": "high" | "medium" | "low"
+}}
+
+Rules:
+- Keep recommendations grounded in the player profile.
+- Do not invent URLs or citations.
+- Include ethical disclaimers about AI-generated predictions and player data privacy.
+- If the user's question is NOT related to gaming, player engagement, churn prediction, or retention strategies, respond with: "I'm specialized in player churn analysis and game engagement strategies. Please ask a question related to this player's gaming behavior or retention."
+"""
+
+
 class ChurnAgent:
     def __init__(self, llm: Any | None = None):
         self.llm = llm
         self.app = self._compile_workflow()
 
     def invoke(self, state: AgentState) -> AgentState:
+        user_query = state.get("user_query")
+
+        # Guard: reject off-topic questions before running the full pipeline
+        if user_query and not _is_relevant_query(user_query):
+            return {
+                "player_data": state["player_data"],
+                "user_query": user_query,
+                "ml_prediction": {"churn_probability": 0.0, "will_churn": False, "risk_level": "LOW"},
+                "engagement_analysis": "",
+                "key_risk_factors": [],
+                "personalized_strategies": [],
+                "confidence_level": "low",
+                "warnings": ["Query is not related to gaming or player engagement."],
+                "final_report": {
+                    "direct_answer_to_user": _OFF_TOPIC_RESPONSE,
+                    "executive_summary": _OFF_TOPIC_RESPONSE,
+                    "engagement_analysis": "",
+                    "key_risk_factors": [],
+                    "personalized_strategies": [],
+                    "industry_best_practices": [],
+                    "sources": [],
+                    "disclaimers": _get_disclaimers(),
+                    "confidence_level": "low",
+                },
+            }
+
         initial_state: AgentState = {
             "player_data": state["player_data"],
-            "user_query": state.get("user_query"),
+            "user_query": user_query,
             "warnings": list(state.get("warnings", [])),
         }
         return self.app.invoke(initial_state)
@@ -423,7 +544,7 @@ class ChurnAgent:
 
         try:
             response = self.llm.invoke(
-                build_analysis_prompt(state["player_data"], state["ml_prediction"])
+                _build_analysis_prompt(state["player_data"], state["ml_prediction"])
             )
             payload = _safe_json_loads(getattr(response, "content", "")) or {}
             analysis = payload.get("engagement_analysis")
@@ -481,22 +602,7 @@ class ChurnAgent:
             }
 
         try:
-            query_to_use = state.get("user_query") or get_dynamic_query(
-                state.get("ml_prediction", {}).get("risk_level", "MEDIUM")
-            )
-            analysis_dict = {
-                "engagement_analysis": state["engagement_analysis"],
-                "key_risk_factors": state["key_risk_factors"],
-                "confidence_level": state["confidence_level"],
-            }
-            prompt_str = build_report_prompt(
-                user_query=query_to_use,
-                player_data=state["player_data"],
-                prediction=state["ml_prediction"],
-                analysis=analysis_dict,
-                industry_best_practices=state.get("industry_best_practices", []),
-            )
-            response = self.llm.invoke(prompt_str)
+            response = self.llm.invoke(_build_report_prompt(state))
             payload = _safe_json_loads(getattr(response, "content", "")) or {}
             if not isinstance(payload, dict) or "executive_summary" not in payload:
                 raise ValueError("LLM returned incomplete report payload")
