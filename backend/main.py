@@ -219,11 +219,17 @@ def health_check():
 def model_info():
     """Return model metadata."""
     _ensure_model_loaded()
+
+    # Get intercept if available (LogisticRegression has it, RandomForest does not)
+    intercept = None
+    if hasattr(model, "intercept_") and len(model.intercept_) > 0:
+        intercept = round(float(model.intercept_[0]), 4)
+
     return {
         "model_type": type(model).__name__,
         "n_features": len(feature_names),
         "features": feature_names,
-        "intercept": round(float(model.intercept_[0]), 4),
+        "intercept": intercept,
         "categorical_mappings": {
             col: list(le.classes_) for col, le in label_encoders.items()
         },
@@ -398,20 +404,43 @@ def model_compare():
 
 @app.get("/model/feature-importance")
 def feature_importance():
-    """Return Logistic Regression feature importances sorted by importance."""
+    """Return feature importances sorted by importance."""
     _ensure_model_loaded()
-    result = _build_weight_rows(feature_names, model.coef_[0])
+
+    # RandomForest uses feature_importances_, LogisticRegression uses coef_
+    if hasattr(model, "feature_importances_"):
+        importances = model.feature_importances_
+    elif hasattr(model, "coef_"):
+        importances = model.coef_[0]
+    else:
+        importances = np.zeros(len(feature_names))
+
+    result = _build_weight_rows(feature_names, importances)
     return {"feature_importance": result}
 
 
 @app.get("/model/weights")
 def model_weights():
-    """Return signed Logistic Regression weights for each feature."""
+    """Return model weights/feature importances."""
     _ensure_model_loaded()
+
+    # Get intercept if available (LogisticRegression has it, RandomForest does not)
+    intercept = None
+    if hasattr(model, "intercept_") and len(model.intercept_) > 0:
+        intercept = round(float(model.intercept_[0]), 4)
+
+    # RandomForest uses feature_importances_, LogisticRegression uses coef_
+    if hasattr(model, "feature_importances_"):
+        importances = model.feature_importances_
+    elif hasattr(model, "coef_"):
+        importances = model.coef_[0]
+    else:
+        importances = np.zeros(len(feature_names))
+
     return {
         "model_type": type(model).__name__,
-        "intercept": round(float(model.intercept_[0]), 4),
-        "weights": _build_weight_rows(feature_names, model.coef_[0]),
+        "intercept": intercept,
+        "weights": _build_weight_rows(feature_names, importances),
     }
 
 

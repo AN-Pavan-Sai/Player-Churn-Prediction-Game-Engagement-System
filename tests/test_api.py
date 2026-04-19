@@ -90,11 +90,11 @@ class TestModelInfoEndpoint:
     def test_model_info_has_features(self, client):
         data = client.get("/model/info").json()
         assert "features" in data
-        assert len(data["features"]) == 15
+        assert len(data["features"]) == 16
 
     def test_model_info_has_type(self, client):
         data = client.get("/model/info").json()
-        assert data["model_type"] == "LogisticRegression"
+        assert data["model_type"] == "RandomForestClassifier"
 
     def test_model_info_has_categorical_mappings(self, client):
         data = client.get("/model/info").json()
