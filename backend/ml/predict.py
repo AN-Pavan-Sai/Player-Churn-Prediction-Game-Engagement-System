@@ -11,14 +11,21 @@ import os
 from backend.ml.feature_engineering import run_feature_engineering
 from backend.ml.preprocess import MODELS_DIR
 
+# Module-level cache so model artifacts are loaded once, not on every call
+_cached_artifacts = None
+
 
 def load_model():
-    """Load the trained model and artifacts."""
+    """Load the trained model and artifacts (cached after first call)."""
+    global _cached_artifacts
+    if _cached_artifacts is not None:
+        return _cached_artifacts
     model = joblib.load(os.path.join(MODELS_DIR, "churn_model.pkl"))
     scaler = joblib.load(os.path.join(MODELS_DIR, "scaler.pkl"))
     label_encoders = joblib.load(os.path.join(MODELS_DIR, "label_encoders.pkl"))
     feature_names = joblib.load(os.path.join(MODELS_DIR, "feature_names.pkl"))
-    return model, scaler, label_encoders, feature_names
+    _cached_artifacts = (model, scaler, label_encoders, feature_names)
+    return _cached_artifacts
 
 
 def predict_single(player_data: dict) -> dict:
@@ -61,13 +68,13 @@ def predict_single(player_data: dict) -> dict:
     prediction = model.predict(df_scaled)[0]
     probability = model.predict_proba(df_scaled)[0][1]
 
-    # Risk level
+    # Risk level (UPPERCASE to match workflow.py convention)
     if probability >= 0.7:
-        risk_level = "High"
+        risk_level = "HIGH"
     elif probability >= 0.4:
-        risk_level = "Medium"
+        risk_level = "MEDIUM"
     else:
-        risk_level = "Low"
+        risk_level = "LOW"
 
     return {
         "churned": int(prediction),

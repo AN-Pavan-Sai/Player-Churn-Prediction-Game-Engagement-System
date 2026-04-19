@@ -46,7 +46,6 @@ export interface ModelInfoResponse {
 
 export interface ModelCompareResponse {
   logistic_regression: Record<string, number>;
-  random_forest: Record<string, number>;
 }
 
 export interface FeatureImportanceItem {

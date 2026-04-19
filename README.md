@@ -47,6 +47,8 @@ Built with **FastAPI** (backend), **Next.js 14** (frontend), and **scikit-learn*
 ├── backend/
 │   ├── main.py                  # FastAPI application
 │   ├── requirements.txt         # Python dependencies
+│   ├── agent/
+│   │   └── workflow.py          # LangGraph agentic AI workflow
 │   ├── ml/
 │   │   ├── preprocess.py        # Data loading & encoding
 │   │   ├── feature_engineering.py # 5 derived features
@@ -57,8 +59,7 @@ Built with **FastAPI** (backend), **Next.js 14** (frontend), and **scikit-learn*
 │   ├── src/
 │   │   ├── app/
 │   │   │   ├── layout.tsx       # Root layout + Navbar + Toaster
-│   │   │   ├── page.tsx         # Home page (hero + features)
-│   │   │   ├── predict/page.tsx # Prediction form + results
+│   │   │   ├── page.tsx         # Prediction form + results
 │   │   │   ├── about/page.tsx   # About, metrics, tech stack
 │   │   │   └── globals.css      # Tailwind + custom styles
 │   │   ├── components/
@@ -73,9 +74,7 @@ Built with **FastAPI** (backend), **Next.js 14** (frontend), and **scikit-learn*
 │   └── tailwind.config.ts
 ├── data/
 │   └── online_gaming_behavior_dataset.csv
-├── notebooks/
-│   ├── exploration.ipynb        # Comprehensive EDA
-│   └── plots/                   # Saved visualisations
+├── tests/                       # Unit tests
 └── README.md
 ```
 
@@ -139,7 +138,11 @@ The app will be live at **http://localhost:3000**
 |--------|----------|-------------|
 | `GET` | `/health` | Health check + model status |
 | `GET` | `/model/info` | Model metadata & feature names |
+| `GET` | `/model/compare` | Model evaluation metrics |
+| `GET` | `/model/feature-importance` | Feature importance rankings |
+| `GET` | `/model/weights` | Signed logistic regression weights |
 | `POST` | `/predict` | Predict churn for a single player |
+| `POST` | `/agent/ask` | Ask the AI agent for engagement insights |
 
 ### Example request
 
