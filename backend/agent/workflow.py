@@ -47,6 +47,34 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+# Keywords that indicate a gaming / churn / engagement related question
+_RELEVANT_KEYWORDS = {
+    "churn", "player", "game", "gaming", "engagement", "retention", "session",
+    "play", "level", "achievement", "purchase", "risk", "score", "strategy",
+    "recommend", "inactive", "active", "quit", "leave", "return", "comeback",
+    "reward", "offer", "notification", "progression", "difficulty", "genre",
+    "duration", "frequency", "behavior", "behaviour", "predict", "analysis",
+    "why", "how", "what", "factor", "reason", "cause", "improve", "reduce",
+    "increase", "decrease", "save", "lose", "losing", "engaged", "disengaged",
+    "monetization", "spending", "revenue", "ltv", "lifetime", "loyalty",
+}
+
+_OFF_TOPIC_RESPONSE = (
+    "I'm specialized in player churn analysis and game engagement strategies. "
+    "Your question doesn't appear to be related to this player's gaming behavior. "
+    "Please ask about churn risk factors, engagement patterns, or retention strategies "
+    "for this player profile."
+)
+
+
+def _is_relevant_query(query: str | None) -> bool:
+    """Return True if the query is related to gaming / churn / engagement."""
+    if not query or not query.strip():
+        return True  # empty query = use default dynamic query
+    words = set(query.lower().split())
+    return bool(words & _RELEVANT_KEYWORDS)
+
+
 def get_dynamic_query(risk_level: str) -> str:
     if risk_level == "HIGH":
         return "This player is at high risk of churning. What are the critical warning signs, and what immediate, personalized actions can we take to save them?"
@@ -269,6 +297,59 @@ def _get_sources() -> list[str]:
     ]
 
 
+def _build_query_focused_answer(user_query: str | None, player_data: dict[str, Any], prediction: dict[str, Any]) -> str:
+    """Generate a focused answer that directly addresses the user's question using heuristics."""
+    if not user_query or not user_query.strip():
+        return ""
+
+    query_lower = user_query.lower()
+    risk_level = prediction["risk_level"]
+    prob = prediction["churn_probability"]
+
+    # Detect common question intents and produce tailored answers
+    if any(w in query_lower for w in ["why", "reason", "cause", "factor"]):
+        factors = _derive_risk_factors(player_data, prediction)
+        factors_text = " ".join(factors)
+        return (
+            f"Based on the player profile, the model predicts a {prob:.1%} churn probability ({risk_level} risk). "
+            f"The main contributing factors are: {factors_text}"
+        )
+
+    if any(w in query_lower for w in ["how", "save", "retain", "keep", "prevent", "reduce", "improve", "strategy", "action", "recommend"]):
+        strategies = _fallback_personalized_strategies(player_data, prediction, [])
+        strategies_text = " ".join(f"({i+1}) {s}" for i, s in enumerate(strategies))
+        return (
+            f"To address this player's {risk_level.lower()} churn risk ({prob:.1%} probability), "
+            f"here are the recommended actions: {strategies_text}"
+        )
+
+    if any(w in query_lower for w in ["engagement", "session", "active", "inactive", "behavior", "behaviour", "pattern"]):
+        snapshot = _build_feature_snapshot(player_data)
+        return (
+            f"This player's engagement profile shows: Engagement Score = {snapshot['EngagementScore']}, "
+            f"Progression Rate = {snapshot['ProgressionRate']}, Session Consistency = {'Yes' if snapshot['SessionConsistency'] else 'No'}, "
+            f"Inactive Flag = {'Yes' if snapshot['IsInactive'] else 'No'}. "
+            f"Overall churn risk is {risk_level} at {prob:.1%} probability."
+        )
+
+    if any(w in query_lower for w in ["purchase", "spend", "money", "monetiz", "revenue", "pay"]):
+        purchases = player_data.get("InGamePurchases", 0)
+        status = "has made in-game purchases" if purchases else "has not made any in-game purchases"
+        return (
+            f"This player {status}. "
+            f"{'Paying players typically show stronger retention signals.' if purchases else 'Non-paying players are generally at higher churn risk. Consider offering value-first promotions.'} "
+            f"Current churn probability: {prob:.1%} ({risk_level} risk)."
+        )
+
+    # Generic fallback that still incorporates the query
+    factors = _derive_risk_factors(player_data, prediction)
+    return (
+        f"Regarding your question about this player: The model assigns a {prob:.1%} churn probability ({risk_level} risk). "
+        f"Key observations: {' '.join(factors[:3])}"
+    )
+
+
+
 def _fallback_report(state: AgentState) -> dict[str, Any]:
     best_practices = state.get("industry_best_practices") or _local_best_practices(
         state["player_data"], state["ml_prediction"]
@@ -284,7 +365,14 @@ def _fallback_report(state: AgentState) -> dict[str, Any]:
     else:
         action_text = "regular engagement monitoring is advised."
 
+    # Build a query-focused direct answer when a user question is present
+    user_query = state.get("user_query")
+    direct_answer = _build_query_focused_answer(
+        user_query, state["player_data"], state["ml_prediction"]
+    )
+
     return {
+        "direct_answer_to_user": direct_answer,
         "executive_summary": (
             f"Player shows {risk_level} churn risk with "
             f"{prob:.1%} predicted probability. "
@@ -365,6 +453,7 @@ Rules:
 - Keep recommendations grounded in the player profile.
 - Do not invent URLs or citations.
 - Include ethical disclaimers about AI-generated predictions and player data privacy.
+- If the user's question is NOT related to gaming, player engagement, churn prediction, or retention strategies, respond with: "I'm specialized in player churn analysis and game engagement strategies. Please ask a question related to this player's gaming behavior or retention."
 """
 
 
@@ -374,9 +463,35 @@ class ChurnAgent:
         self.app = self._compile_workflow()
 
     def invoke(self, state: AgentState) -> AgentState:
+        user_query = state.get("user_query")
+
+        # Guard: reject off-topic questions before running the full pipeline
+        if user_query and not _is_relevant_query(user_query):
+            return {
+                "player_data": state["player_data"],
+                "user_query": user_query,
+                "ml_prediction": {"churn_probability": 0.0, "will_churn": False, "risk_level": "LOW"},
+                "engagement_analysis": "",
+                "key_risk_factors": [],
+                "personalized_strategies": [],
+                "confidence_level": "low",
+                "warnings": ["Query is not related to gaming or player engagement."],
+                "final_report": {
+                    "direct_answer_to_user": _OFF_TOPIC_RESPONSE,
+                    "executive_summary": _OFF_TOPIC_RESPONSE,
+                    "engagement_analysis": "",
+                    "key_risk_factors": [],
+                    "personalized_strategies": [],
+                    "industry_best_practices": [],
+                    "sources": [],
+                    "disclaimers": _get_disclaimers(),
+                    "confidence_level": "low",
+                },
+            }
+
         initial_state: AgentState = {
             "player_data": state["player_data"],
-            "user_query": state.get("user_query"),
+            "user_query": user_query,
             "warnings": list(state.get("warnings", [])),
         }
         return self.app.invoke(initial_state)
