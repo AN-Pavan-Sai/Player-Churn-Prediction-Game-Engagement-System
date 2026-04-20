@@ -270,54 +270,152 @@ def _get_sources() -> list[str]:
     ]
 
 
-def _build_query_focused_answer(user_query: str | None, player_data: dict[str, Any], prediction: dict[str, Any]) -> str:
-    """Generate a focused answer that directly addresses the user's question using heuristics."""
+# Guardrail: topics clearly outside the app's scope
+_OFF_TOPIC_KEYWORDS = [
+    "weather", "capital", "president", "recipe", "cook", "bake", "sports score",
+    "movie", "music", "history", "politics", "stock", "crypto", "forex",
+    "translate", "language", "poem", "story", "write me", "essay",
+    "joke", "math", "equation", "solve", "code", "program", "debug",
+    "python", "javascript", "sql", "hospital", "doctor", "medicine",
+]
+
+_OFF_TOPIC_REPLY = (
+    "I am an AI specialized in player churn analysis and game engagement strategies "
+    "for this application. I cannot answer questions outside this scope. "
+    "Please ask me about this player's churn risk, engagement patterns, or retention strategies."
+)
+
+
+def _build_query_focused_answer(
+    user_query: str | None,
+    player_data: dict[str, Any],
+    prediction: dict[str, Any],
+) -> str:
+    """Generate a dynamic, focused answer that directly addresses the user's question."""
     if not user_query or not user_query.strip():
         return ""
 
-    query_lower = user_query.lower()
+    q = user_query.lower()
     risk_level = prediction["risk_level"]
     prob = prediction["churn_probability"]
+    lvl = player_data.get("PlayerLevel", "N/A")
+    sessions = player_data.get("SessionsPerWeek", "N/A")
+    duration = player_data.get("AvgSessionDurationMinutes", "N/A")
+    achievements = player_data.get("AchievementsUnlocked", "N/A")
+    playtime = player_data.get("PlayTimeHours", "N/A")
+    genre = player_data.get("GameGenre", "N/A")
+    difficulty = player_data.get("GameDifficulty", "N/A")
+    purchases = player_data.get("InGamePurchases", 0)
+    age = player_data.get("Age", "N/A")
+    location = player_data.get("Location", "N/A")
 
-    # Detect common question intents and produce tailored answers
-    if any(w in query_lower for w in ["why", "reason", "cause", "factor"]):
+    # --- Off-topic guardrail ---
+    if any(kw in q for kw in _OFF_TOPIC_KEYWORDS):
+        return _OFF_TOPIC_REPLY
+
+    # --- "About me / Tell me about this player" ---
+    if any(w in q for w in ["about me", "about myself", "who am i", "my stats", "my profile",
+                             "tell me about", "summarize", "overview", "profile"]):
+        snapshot = _build_feature_snapshot(player_data)
+        purchase_status = "has made in-game purchases" if purchases else "has not made any purchases"
+        return (
+            f"Here is your gaming profile: You are a {age}-year-old {genre} player from {location}, "
+            f"currently at Level {lvl} with {achievements} achievements unlocked. "
+            f"You play {sessions} sessions per week, averaging {duration} minutes per session "
+            f"(total {playtime} hours). You {purchase_status}. "
+            f"Your engagement score is {snapshot['EngagementScore']} and progression rate is {snapshot['ProgressionRate']}. "
+            f"The ML model assigns you a {prob:.1%} churn probability, placing you in the {risk_level} risk category."
+        )
+
+    # --- Churn risk / probability ---
+    if any(w in q for w in ["churn", "risk", "probability", "likelihood", "chance", "will i leave",
+                             "will they leave", "leaving"]):
         factors = _derive_risk_factors(player_data, prediction)
-        factors_text = " ".join(factors)
         return (
-            f"Based on the player profile, the model predicts a {prob:.1%} churn probability ({risk_level} risk). "
-            f"The main contributing factors are: {factors_text}"
+            f"This player has a {prob:.1%} churn probability and is classified as {risk_level} risk. "
+            f"The key factors driving this prediction are: {' '.join(factors[:3])}"
         )
 
-    if any(w in query_lower for w in ["how", "save", "retain", "keep", "prevent", "reduce", "improve", "strategy", "action", "recommend"]):
+    # --- Why / reasons / causes ---
+    if any(w in q for w in ["why", "reason", "cause", "what makes", "factor", "explain"]):
+        factors = _derive_risk_factors(player_data, prediction)
+        return (
+            f"Based on the player's data, the {prob:.1%} churn probability ({risk_level} risk) is driven by: "
+            + " ".join(f"({i+1}) {f}" for i, f in enumerate(factors))
+        )
+
+    # --- Retention / how to keep / strategies ---
+    if any(w in q for w in ["how", "save", "retain", "keep", "prevent", "reduce", "improve",
+                             "strategy", "strategies", "action", "recommend", "suggestion",
+                             "what should", "what can", "what to do"]):
         strategies = _fallback_personalized_strategies(player_data, prediction, [])
-        strategies_text = " ".join(f"({i+1}) {s}" for i, s in enumerate(strategies))
         return (
-            f"To address this player's {risk_level.lower()} churn risk ({prob:.1%} probability), "
-            f"here are the recommended actions: {strategies_text}"
+            f"To retain this {risk_level.lower()}-risk player ({prob:.1%} churn probability), "
+            f"here are specific recommended actions: "
+            + " ".join(f"({i+1}) {s}" for i, s in enumerate(strategies))
         )
 
-    if any(w in query_lower for w in ["engagement", "session", "active", "inactive", "behavior", "behaviour", "pattern"]):
+    # --- Session / engagement / activity ---
+    if any(w in q for w in ["session", "engagement", "active", "inactive", "activity",
+                             "behavior", "behaviour", "pattern", "play time", "playtime"]):
+        snapshot = _build_feature_snapshot(player_data)
+        inactive_flag = "Yes" if snapshot["IsInactive"] else "No"
+        consistency = "Yes" if snapshot["SessionConsistency"] else "No"
+        return (
+            f"This player logs {sessions} sessions/week, averaging {duration} minutes each "
+            f"(total {playtime} hours). Their Engagement Score is {snapshot['EngagementScore']}, "
+            f"Progression Rate is {snapshot['ProgressionRate']}, "
+            f"Session Consistency: {consistency}, Inactive Flag: {inactive_flag}. "
+            f"Overall churn risk: {risk_level} ({prob:.1%})."
+        )
+
+    # --- Level / progression ---
+    if any(w in q for w in ["level", "progress", "progression", "advance", "grow"]):
         snapshot = _build_feature_snapshot(player_data)
         return (
-            f"This player's engagement profile shows: Engagement Score = {snapshot['EngagementScore']}, "
-            f"Progression Rate = {snapshot['ProgressionRate']}, Session Consistency = {'Yes' if snapshot['SessionConsistency'] else 'No'}, "
-            f"Inactive Flag = {'Yes' if snapshot['IsInactive'] else 'No'}. "
-            f"Overall churn risk is {risk_level} at {prob:.1%} probability."
+            f"This player is at Level {lvl} with {playtime} total hours played. "
+            f"Their Progression Rate is {snapshot['ProgressionRate']} and they have unlocked {achievements} achievements. "
+            f"{'Progression is slow relative to playtime, which can signal friction or boredom.' if snapshot['ProgressionRate'] < 1.0 else 'Progression appears healthy for their playtime.'} "
+            f"Churn risk: {risk_level} ({prob:.1%})."
         )
 
-    if any(w in query_lower for w in ["purchase", "spend", "money", "monetiz", "revenue", "pay"]):
-        purchases = player_data.get("InGamePurchases", 0)
-        status = "has made in-game purchases" if purchases else "has not made any in-game purchases"
+    # --- Purchase / spending / monetization ---
+    if any(w in q for w in ["purchase", "spend", "money", "monetiz", "revenue", "pay",
+                             "transaction", "buy", "store"]):
+        status = "has made in-game purchases" if purchases else "has NOT made any in-game purchases"
+        tip = (
+            "Paying players tend to show stronger retention signals."
+            if purchases
+            else "Non-paying players are at higher churn risk — consider a value-first starter bundle."
+        )
         return (
-            f"This player {status}. "
-            f"{'Paying players typically show stronger retention signals.' if purchases else 'Non-paying players are generally at higher churn risk. Consider offering value-first promotions.'} "
-            f"Current churn probability: {prob:.1%} ({risk_level} risk)."
+            f"This player {status}. {tip} "
+            f"Churn probability: {prob:.1%} ({risk_level} risk)."
         )
 
-    # Generic fallback that still incorporates the query
+    # --- Achievements ---
+    if any(w in q for w in ["achievement", "unlock", "badge", "trophy", "milestone"]):
+        low = achievements <= 3
+        return (
+            f"This player has unlocked {achievements} achievements. "
+            f"{'This is very low and suggests limited motivation or exposure to milestone systems.' if low else 'Achievement activity appears reasonable.'} "
+            f"Churn risk: {risk_level} ({prob:.1%})."
+        )
+
+    # --- Genre / difficulty ---
+    if any(w in q for w in ["genre", "difficulty", "game type", "mode"]):
+        return (
+            f"This player plays {genre} games on {difficulty} difficulty. "
+            f"Their churn risk is {risk_level} ({prob:.1%}). "
+            f"{'Strategy and RPG players often need clearer progression goals to stay engaged.' if genre.lower() in ('strategy', 'rpg') else 'Keeping content fresh and difficulty balanced is key to retention.'}"
+        )
+
+    # --- Generic on-topic fallback (still uses real data) ---
     factors = _derive_risk_factors(player_data, prediction)
     return (
-        f"Regarding your question about this player: The model assigns a {prob:.1%} churn probability ({risk_level} risk). "
+        f"Based on your question about this player: They have a {prob:.1%} churn probability ({risk_level} risk). "
+        f"They are Level {lvl}, play {sessions} sessions/week averaging {duration} min each, "
+        f"and have {achievements} achievements. "
         f"Key observations: {' '.join(factors[:3])}"
     )
 
@@ -421,6 +519,7 @@ class ChurnAgent:
 
         try:
             prompt_str = ANALYSIS_PROMPT_TEMPLATE.format(
+                user_query=state.get("user_query") or "Analyze this player's churn risk",
                 player_data=json.dumps(state["player_data"], indent=2),
                 prediction=json.dumps(state["ml_prediction"], indent=2),
             )
@@ -481,9 +580,11 @@ class ChurnAgent:
             }
 
         try:
-            query_to_use = state.get("user_query") or get_dynamic_query(
-                state.get("ml_prediction", {}).get("risk_level", "MEDIUM")
-            )
+            # Use the ACTUAL user query — never substitute a generic fallback
+            # so the LLM always answers what the user literally asked
+            query_to_use = (state.get("user_query") or "").strip()
+            if not query_to_use:
+                query_to_use = "Provide a full churn risk analysis and retention recommendations for this player."
             analysis_dict = {
                 "engagement_analysis": state["engagement_analysis"],
                 "key_risk_factors": state["key_risk_factors"],
