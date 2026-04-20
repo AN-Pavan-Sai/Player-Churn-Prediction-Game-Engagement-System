@@ -12,3 +12,7 @@ services:
     envVars:
       - key: PYTHONPATH
         value: .
+      - key: GROQ_API_KEY
+        sync: false          # Set this manually in the Render dashboard (keep it secret)
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
